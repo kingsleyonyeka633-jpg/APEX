@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Apex paper desk</title>
+<style>
+  :root {
+    --bg:#F3F5F8; --ink:#15202B; --muted:#5A6B7C; --line:#D5DCE5; --accent:#2C5E8F;
+    --gain:#1E7B5C; --loss:#B5402B; --warn:#A9701A; --fill:#E3E9F0;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0E1620; --ink:#E4EAF1; --muted:#8EA0B2; --line:#26313D; --accent:#6FA3D6;
+            --gain:#4FC49A; --loss:#EE7B66; --warn:#E0B15A; --fill:#1B2733; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); line-height:1.5;
+         font:16px/1.5 "Avenir Next","Segoe UI",system-ui,-apple-system,sans-serif; font-variant-numeric:tabular-nums; }
+  main { max-width:760px; margin:0 auto; padding:20px 16px 64px; }
+  h1 { font-size:1.05rem; margin:0; font-weight:650; letter-spacing:.01em; }
+  h2 { font-size:1rem; margin:34px 0 6px; font-weight:650; }
+  p.note { margin:0 0 12px; color:var(--muted); font-size:.92rem; max-width:62ch; }
+  header { display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; }
+  .status { font-size:.92rem; color:var(--muted); display:flex; align-items:center; gap:8px; }
+  .dot { width:9px; height:9px; border-radius:50%; background:var(--muted); display:inline-block; }
+  .dot.ok { background:var(--gain); } .dot.bad { background:var(--loss); } .dot.stale { background:var(--warn); }
+  .equity { margin:18px 0 4px; display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; }
+  .equity .big { font-size:1.9rem; font-weight:700; }
+  .gain { color:var(--gain); } .loss { color:var(--loss); }
+  canvas { width:100%; height:240px; display:block; }
+  .legend { color:var(--muted); font-size:.85rem; display:flex; gap:16px; margin-top:4px; }
+  .legend i { display:inline-block; width:14px; height:3px; vertical-align:middle; margin-right:6px; border-radius:2px; }
+  .costbar { display:flex; height:14px; border-radius:7px; overflow:hidden; background:var(--fill); margin:8px 0 6px; }
+  .costbar div { height:100%; }
+  .meter { margin:10px 0; }
+  .meter .row { display:flex; justify-content:space-between; font-size:.92rem; }
+  .meter .track { height:8px; background:var(--fill); border-radius:4px; overflow:hidden; margin-top:4px; }
+  .meter .fillbar { height:100%; background:var(--accent); border-radius:4px; transition:width .5s; }
+  .meter .fillbar.hot { background:var(--loss); }
+  table { width:100%; border-collapse:collapse; font-size:.92rem; }
+  th { text-align:left; font-weight:600; color:var(--muted); padding:6px 8px 6px 0; border-bottom:1px solid var(--line); }
+  td { padding:8px 8px 8px 0; border-bottom:1px solid var(--line); }
+  td.num, th.num { text-align:right; padding-right:0; }
+  .empty { color:var(--muted); padding:8px 0; max-width:60ch; }
+  .tablewrap { overflow-x:auto; }
+  button { font:inherit; padding:10px 16px; border-radius:8px; border:1px solid var(--loss); color:var(--loss);
+           background:transparent; cursor:pointer; }
+  button:hover { background:var(--loss); color:var(--bg); }
+  .arms { display:flex; gap:8px; margin:16px 0 4px; flex-wrap:wrap; }
+  button.arm { padding:6px 14px; border-radius:16px; border:1px solid var(--line); color:var(--muted); background:transparent; }
+  button.arm:hover { background:var(--fill); color:var(--ink); }
+  button.arm[aria-pressed="true"] { color:var(--ink); border-color:var(--accent); background:var(--fill); }
+  button:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
+  #msg { margin-left:12px; color:var(--muted); font-size:.92rem; }
+  .banner { margin-top:14px; padding:10px 12px; border-left:4px solid var(--loss); background:var(--fill); display:none; }
+  @media (prefers-reduced-motion: reduce) { .meter .fillbar { transition:none; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Apex paper desk</h1>
+    <div class="status"><span class="dot" id="dot"></span><span id="statusText">Loading</span></div>
+  </header>
+  <div class="banner" id="banner"></div>
+
+  <div class="equity"><span class="big" id="eqNow">-</span><span id="eqRet"></span><span id="eqDd" style="color:var(--muted)"></span></div>
+  <canvas id="chart" aria-label="Equity curve with drawdown"></canvas>
+  <div class="legend"><span><i style="background:var(--accent)"></i>Account value</span><span><i style="background:var(--loss);opacity:.5"></i>Below its previous high</span></div>
+
+  <div class="arms" role="group" aria-label="Which paper bot to show">
+    <button class="arm" data-arm="rules" aria-pressed="true">Rules only</button>
+    <button class="arm" data-arm="ml" aria-pressed="false">Rules + ML filter</button>
+  </div>
+  <p class="note" id="mlNote"></p>
+
+  <h2>What trading cost you</h2>
+  <p class="note" id="costNote"></p>
+  <div class="costbar" id="costBar"></div>
+  <div class="legend" id="costLegend"></div>
+
+  <h2>Risk limits</h2>
+  <div class="meter"><div class="row"><span>Today's loss</span><span id="dayTxt"></span></div><div class="track"><div class="fillbar" id="dayBar"></div></div></div>
+  <div class="meter"><div class="row"><span>Drop from the highest point</span><span id="ddTxt"></span></div><div class="track"><div class="fillbar" id="ddBar"></div></div></div>
+  <div class="meter"><div class="row"><span>Open positions</span><span id="openTxt"></span></div><div class="track"><div class="fillbar" id="openBar"></div></div></div>
+
+  <h2>Open positions</h2>
+  <div class="tablewrap" id="positions"></div>
+
+  <h2>Recent trades</h2>
+  <div class="tablewrap" id="trades"></div>
+
+  <h2>Which strategies earn their keep</h2>
+  <div class="tablewrap" id="layers"></div>
+
+  <h2>Emergency stop</h2>
+  <p class="note">Sells every position at market and stops trading until you restart it by hand. Needs the dashboard token.</p>
+  <button id="kill">Stop trading and sell everything</button><span id="msg" role="status"></span>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const money = v => (v < 0 ? "-" : "") + "$" + Math.abs(v).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+const pct = (v, d=1) => (v >= 0 ? "+" : "") + (v * 100).toFixed(d) + "%";
+const cls = v => v >= 0 ? "gain" : "loss";
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+let firstDraw = true, arm = "rules";
+
+function table(el, cols, rows, empty) {
+  if (!rows.length) { el.innerHTML = '<div class="empty">' + empty + '</div>'; return; }
+  el.innerHTML = '<table><thead><tr>' + cols.map(c => '<th class="' + (c.num ? "num" : "") + '">' + c.h + '</th>').join("") +
+    '</tr></thead><tbody>' + rows.map(r => '<tr>' + cols.map(c => '<td class="' + (c.num ? "num " : "") + (c.cls ? c.cls(r) : "") + '">' + c.f(r) + '</td>').join("") + '</tr>').join("") + '</tbody></table>';
+}
+
+function drawChart(curve) {
+  const cv = $("chart"), dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight; cv.width = w * dpr; cv.height = h * dpr;
+  const g = cv.getContext("2d"); g.scale(dpr, dpr); g.clearRect(0, 0, w, h);
+  if (curve.length < 2) { g.fillStyle = css("--muted"); g.font = "15px system-ui"; g.fillText("The curve appears after the first completed 15-minute bar.", 4, 30); return; }
+  const ys = curve.map(p => p[1]), lo = Math.min(...ys), hi = Math.max(...ys), pad = (hi - lo) * 0.15 || hi * 0.01;
+  const top = 8, plotH = h - 62, ddTop = h - 48, ddH = 40, L = 4, R = 4;
+  const X = i => L + (w - L - R) * i / (curve.length - 1), Y = v => top + plotH * (1 - (v - (lo - pad)) / ((hi + pad) - (lo - pad)));
+  let peak = -Infinity; const dd = ys.map(v => { peak = Math.max(peak, v); return v / peak - 1; });
+  const minDd = Math.min(...dd, -0.001);
+  const total = firstDraw && !matchMedia("(prefers-reduced-motion: reduce)").matches ? 700 : 0; const t0 = performance.now();
+  const paint = (k) => {
+    const n = Math.max(2, Math.floor(curve.length * k)); g.clearRect(0, 0, w, h);
+    g.strokeStyle = css("--line"); g.lineWidth = 1; g.beginPath(); g.moveTo(L, ddTop - 6); g.lineTo(w - R, ddTop - 6); g.stroke();
+    g.fillStyle = css("--loss"); g.globalAlpha = 0.45; g.beginPath(); g.moveTo(X(0), ddTop);
+    for (let i = 0; i < n; i++) g.lineTo(X(i), ddTop + ddH * (dd[i] / minDd)); g.lineTo(X(n - 1), ddTop); g.closePath(); g.fill(); g.globalAlpha = 1;
+    g.strokeStyle = css("--accent"); g.lineWidth = 2.25; g.lineJoin = "round"; g.beginPath();
+    for (let i = 0; i < n; i++) i ? g.lineTo(X(i), Y(ys[i])) : g.moveTo(X(i), Y(ys[i])); g.stroke();
+    g.fillStyle = css("--muted"); g.font = "12px system-ui"; g.fillText(money(hi), L + 2, top + 10); g.fillText(money(lo), L + 2, top + plotH - 2);
+  };
+  if (!total) { paint(1); } else { const step = now => { const k = Math.min(1, (now - t0) / total); paint(k); if (k < 1) requestAnimationFrame(step); }; requestAnimationFrame(step); }
+  firstDraw = false;
+}
+
+function meter(bar, txt, used, limit, label) {
+  const f = Math.min(1, limit ? used / limit : 0); $(bar).style.width = (f * 100) + "%"; $(bar).classList.toggle("hot", f > 0.8); $(txt).textContent = label;
+}
+
+async function refresh() {
+  let s; try { s = await (await fetch("/api/summary?arm=" + arm)).json(); } catch (e) { $("statusText").textContent = "Cannot reach the dashboard server"; $("dot").className = "dot bad"; return; }
+  const st = s.status, e = s.equity;
+  $("eqNow").textContent = money(e.now);
+  $("eqRet").textContent = pct(e.ret, 2) + " since start"; $("eqRet").className = cls(e.ret);
+  $("eqDd").textContent = e.drawdown < -0.0005 ? pct(e.drawdown, 1) + " from the high" : "at its high";
+  const banner = $("banner");
+  if (st.halted) { banner.style.display = "block"; banner.textContent = "Trading is halted (" + st.reason + "). All positions were sold. Restart the bot by hand when you have reviewed what happened."; } else banner.style.display = "none";
+  let dot = "dot", txt;
+  if (!st.has_data) txt = "Waiting for the first completed bar";
+  else if (st.halted) { dot += " bad"; txt = "Halted: " + st.reason; }
+  else if (st.age_seconds > 1800) { dot += " stale"; txt = "No update for " + Math.round(st.age_seconds / 60) + " minutes. Is the bot running?"; }
+  else { dot += " ok"; txt = "Running on paper money, updated " + Math.max(1, Math.round(st.age_seconds / 60)) + " min ago"; }
+  if (s.progress) { dot = "dot stale"; txt = "Getting ready: " + s.progress; }
+  $("dot").className = dot; $("statusText").textContent = txt;
+  const cmp = s.compare, f = c => c.equity === null ? "no data yet" : money(c.equity) + " (" + pct(c.ret, 2) + ", " + c.trades + " trades)";
+  let note = "Rules only: " + f(cmp.rules) + ". Rules + ML: " + f(cmp.ml) + ". ";
+  note += !s.ml.has_model ? "The ML model has not been trained yet." : (s.ml.active ? "The ML filter is ON: its model beat 'take every signal' on unseen history." : "The ML filter is OFF: its latest model found no edge on unseen history, so both bots trade the same.");
+  if (s.holdout && s.holdout.verdict) note += " Test on unseen history: " + s.holdout.verdict;
+  $("mlNote").textContent = note;
+  drawChart(s.curve);
+
+  const c = s.costs, paid = c.fees + c.slippage;
+  if (!c.trades) { $("costNote").textContent = "No closed trades yet. Once there are, you'll see how much of the profit the market took back."; $("costBar").innerHTML = ""; $("costLegend").innerHTML = ""; }
+  else {
+    const gross = Math.max(c.gross, paid, 1e-9);
+    $("costNote").textContent = c.gross > 0 ? "Before costs the strategies made " + money(c.gross) + ". Fees and slippage took " + money(paid) + " (" + Math.round(paid / c.gross * 100) + "%), leaving " + money(c.net) + "." : "Before costs the strategies made " + money(c.gross) + ", and costs were " + money(paid) + ", so the net result is " + money(c.net) + ".";
+    $("costBar").innerHTML = '<div style="width:' + (c.fees / gross * 100) + '%;background:var(--warn)"></div><div style="width:' + (c.slippage / gross * 100) + '%;background:var(--loss)"></div>';
+    $("costLegend").innerHTML = '<span><i style="background:var(--warn)"></i>Fees ' + money(c.fees) + '</span><span><i style="background:var(--loss)"></i>Slippage ' + money(c.slippage) + '</span>';
+  }
+  const r = s.risk;
+  meter("dayBar", "dayTxt", Math.max(0, -r.day_pnl), r.day_limit, pct(r.day_pnl, 2) + " of " + (r.day_limit * 100).toFixed(0) + "% limit");
+  meter("ddBar", "ddTxt", Math.max(0, -e.drawdown), r.dd_limit, pct(e.drawdown, 2) + " of " + (r.dd_limit * 100).toFixed(0) + "% limit");
+  meter("openBar", "openTxt", r.open, r.max_open, r.open + " of " + r.max_open);
+
+  table($("positions"), [
+    {h:"Coin", f:p => p.sym.replace("USDT", "")}, {h:"Strategy", f:p => p.layer.toLowerCase()},
+    {h:"Entry", num:1, f:p => p.entry.toPrecision(5)}, {h:"Stop", num:1, f:p => p.stop.toPrecision(5)}, {h:"Target", num:1, f:p => p.tp.toPrecision(5)},
+    {h:"Now", num:1, f:p => pct(p.pnl_pct, 2), cls:p => cls(p.pnl_pct)}], s.positions,
+    "No open positions. The bot is waiting for a signal that still pays after fees and slippage.");
+  table($("trades"), [
+    {h:"Coin", f:t => t.sym.replace("USDT", "")}, {h:"Strategy", f:t => t.layer.toLowerCase()}, {h:"Exit", f:t => t.reason},
+    {h:"Result", num:1, f:t => money(t.pnl), cls:t => cls(t.pnl)}, {h:"R", num:1, f:t => t.r.toFixed(2), cls:t => cls(t.r)}], s.trades,
+    "No closed trades yet.");
+  table($("layers"), [
+    {h:"Strategy", f:l => l.layer.toLowerCase()}, {h:"Trades", num:1, f:l => l.trades}, {h:"Win rate", num:1, f:l => (l.win_rate * 100).toFixed(0) + "%"},
+    {h:"Avg R", num:1, f:l => l.avg_r.toFixed(2), cls:l => cls(l.avg_r)}, {h:"Net", num:1, f:l => money(l.pnl), cls:l => cls(l.pnl)}], s.layers,
+    "Results per strategy appear after the first trades. Judge them on at least 100 trades each.");
+}
+
+$("kill").onclick = async () => {
+  if (!confirm("Sell everything and stop trading?")) return;
+  const token = prompt("Dashboard token:"); if (!token) return;
+  const res = await fetch("/api/kill", {method:"POST", headers:{"X-Token": token}}); const j = await res.json();
+  $("msg").textContent = j.message || j.error;
+};
+document.querySelectorAll("button.arm").forEach(b => b.onclick = () => {
+  arm = b.dataset.arm; firstDraw = true;
+  document.querySelectorAll("button.arm").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false")); refresh();
+});
+addEventListener("resize", refresh);
+refresh(); setInterval(refresh, 15000);
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+services:
+  apex:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      APEX_HOME: /data
+      APEX_HOST: 0.0.0.0           # the dashboard refuses to start without DASHBOARD_PASSWORD
+    ports: ["127.0.0.1:8000:8000"]  # localhost only. Reach it with: ssh -L 8000:localhost:8000 you@server
+    volumes: ["./appdata:/data"]
